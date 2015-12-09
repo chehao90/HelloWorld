@@ -1,0 +1,206 @@
+import boto
+import time
+from datetime import date, timedelta
+from boto.mws.connection import MWSConnection
+
+class Inventory:
+	stock = {}
+	adjustments = {}
+
+MarketPlaceID = 'ATVPDKIKX0DER'
+MerchantID = 'A39UHDD64PNN85'
+AccessKeyID = 'AKIAIAQBXZQF3L5CSH3Q'
+SecretKey = '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'
+
+conn = MWSConnection(
+    aws_access_key_id=AccessKeyID,
+    aws_secret_access_key=SecretKey)
+
+conn.SellerId = MerchantID
+conn.Merchant = MerchantID
+conn.MarketplaceId = MarketPlaceID
+
+stockFile = file.open('#stock.txt', 'w')
+#do stock.txt reading stuff
+#set inventory stock from file 
+firstRun = ''
+secondRun = ''
+startTime = ''
+startDate = ''
+
+if firstRun == True:
+	#declare variables
+	firstRun = False
+	startTime = time.strftime("%H:%M:%S")
+	startDate = time.strftime("%Y-%m-%d")
+	shipments = []
+	shipmentItemsFirst = {}
+
+	#request closed shipments on this day too shipment ID is only thing important received items is not
+	#submit request for list of shipments with status of RECEIVING
+	shipRequest = conn.list_inbound_shipments(ShipmentStatusList = ['RECEIVING'])
+	#loop through members of ShipmentData adding each ID to a list
+	for shipment in shipRequest.ListInboundShipmentsResult.ShipmentData:
+		shipments.append(shipment.ShipmentId)
+	while True:
+		try:
+			nextToken = shipRequest.ListInboundShipmentsResult.NextToken
+			shipRequest = conn.list_inbound_shipments_by_next_token(nextToken)
+			for shipment in shipRequest.ListInboundShipmentsByNextTokenResult.ShipmentData:
+				shipments.append(shipment.ShipmentId)
+			while True:
+				try:
+					nextToken = shipRequest.ListInboundShipmentsByNextTokenResult.NextToken
+					shipRequest = conn.list_inbound_shipments_by_next_token(nextToken)
+					for shipment in shipRequest.ListInboundShipmentsByNextTokenResult.ShipmentData:
+						shipments.append(shipment.ShipmentId)
+				except:
+					break
+		except:
+			break
+
+	for shipment in shipments:
+		shipRequest = conn.list_inbound_shipment_items(ShipmentId = shipment)
+		for item in shipRequest.ListInboundShipmentItemsResult.ItemData:
+			shipmentItemsFirst[item.SellerSKU] = item.QuantityReceived
+	while True:
+		try:
+			nextToken = shipRequest.ListInboundShipmentItemsResult.NextToken
+			shipRequest = conn.list_inbound_shipment_items_by_next_token(nextToken)
+			for item in shipRequest.ListInboundShipmentItemsByNextTokenResult.ItemData:
+				shipmentItemsFirst[item.SellerSKU] = item.QuantityReceived
+			while True:
+				try:
+					nextToken = shipRequest.ListInboundShipmentsByNextTokenResult.NextToken
+					shipRequest = conn.list_inbound_shipments_by_next_token(nextToken)
+					for item in shipRequest.ListInboundShipmentItemsByNextTokenResult.ItemData:
+						shipmentItemsFirst[item.SellerSKU] = item.QuantityReceived
+				except:
+					break
+		except:
+			break
+
+#Write a bunch of stuff here
+#shipments[]
+#shipmentItems{}
+stockFile.write('#garb')
+stockFile.close()
+
+if secondRun == True:
+	#read in stock file
+	stockFile = file.open('#stock.txt', 'w')
+	#set variables
+	shipments = []
+	orders = []
+	shipmentItemsFirst = {}
+	shipmentItemsSecond = {}
+	#set second run to false
+	#download shipments stored from previous run
+	for shipment in shipments:
+		shipRequest = conn.list_inbound_shipment_items(ShipmentId = shipment)
+		for item in shipRequest.ListInboundShipmentItemsResult.ItemData:
+			shipmentItemsSecond[item.SellerSKU] = item.QuantityReceived
+	while True:
+		try:
+			nextToken = shipRequest.ListInboundShipmentItemsResult.NextToken
+			shipRequest = conn.list_inbound_shipment_items_by_next_token(nextToken)
+			for item in shipRequest.ListInboundShipmentItemsByNextTokenResult.ItemData:
+				shipmentItemsSecond[item.SellerSKU] = item.QuantityReceived
+			while True:
+				try:
+					nextToken = shipRequest.ListInboundShipmentsByNextTokenResult.NextToken
+					shipRequest = conn.list_inbound_shipments_by_next_token(nextToken)
+					for item in shipRequest.ListInboundShipmentItemsByNextTokenResult.ItemData:
+						shipmentItemsSecond[item.SellerSKU] = item.QuantityReceived
+				except:
+					break
+		except:
+			break
+	#get newly received inventory from stored shipments
+		#this is anything that had not been received at the time of the first run
+	for item in shipmentItemsSecond:
+		shipmentItemsSecond[item] -= shipmentItemsFirst[item]
+	#download closed shipments from after stored time - This requires some more looking into
+	shipRequest = conn.list_inbound_shipments(ShipmentStatusList = ['CLOSED'], LastUpdatedAfter = '2015-11-11', LastUpdateBefore = '2015-11-12')
+	for ship in shipRequest.ListInboundShipmentsResult.ShipmentData:
+		if ship.ShipmentId in shipments:
+			continue
+		else:
+			shipments.append(ship.ShipmentId)
+		while True:
+			try:
+				nextToken = shipRequest.ListInboundShipmentsResult.NextToken
+				shipRequest = conn.list_inbound_shipments_by_next_token(NextToken = nextToken)
+				for ship in shipRequest.ListInboundShipmentsByNextTokenResult.ShipmentData:
+					if ship.ShipmentId in shipments:
+						continue
+					else:
+						shipments.append(ship.ShipmentId)
+				while True:
+					try:
+						nextToken = shipRequest.ListInboundShipmentsByNextTokenResult.NextToken
+						shipRequest = conn.list_inbound_shipments_by_next_token(NextToken = nextToken)
+						for ship in shipRequest.ListInboundShipmentsByNextTokenResult.ShipmentData:
+							if ship.ShipmentId in shipments:
+								continue
+							else:
+								shipments.append(ship.ShipmentId)
+					except:
+						break
+			except:
+				break
+	#add entire received quantity from  new, closed shipments and previous receiving shipments to stock - Maybe don't have to use closed shipments _GET_FBA_FULFILLMENT_INVENTORY_RECEIPTS_DATA_
+	for ship in shipments:
+		shipRequest = conn.list_inbound_shipment_items(ShipmentId = ship)
+		for item in shipRequest.ListInboundShipmentItemsResult.ItemData:
+			#if item in stock 
+				#increment count
+			#else 
+				#make new entry
+		while True:
+			try:
+				nextToken = shipRequest.ListInboundShipmentItemsResult.NextToken
+				shipRequest = conn.list_inbound_shipment_items_by_next_token(NextToken = nextToken)
+				for item in shipRequest.ListInboundShipmentItemsByNextTokenResult.ItemData:
+					#if item in stock
+						#increment count
+					#else
+						#make new entry
+				while True:
+					try:
+						nextToken = shipRequest.ListInboundShipmentItemsByNextTokenResult.NextToken
+						shipRequest = conn.list_inbound_shipment_items_by_next_token(NextToken = nextToken)
+						for item in shipRequest.ListInboundShipmentItemsByNextTokenResult.ItemData:
+							#if item in stock
+								#increment count
+							#else
+								#make new entry
+					except:
+						break
+			except:
+				break
+	#download orders and adjustments from after initial run
+	orderRequest = conn.list_orders(CreatedAfter = start, CreatedBefore = end)
+	for order in orderRequest.ListOrdersResult.Orders:
+		orders.append(order.AmazonOrderId)
+	while True:
+		try:
+			nextToken = orderRequest.ListOrdersResult.NextToken
+			orderRequest = conn.list_orders_by_next_token(NextToken = nextToken)
+			for order in orderRequest.ListOrdersByNextTokenResult.Orders:
+				orders.append(order.AmazonOrderId)
+			while True:
+				try:
+					nextToken = orderRequest.ListOrdersByNextTokenResult.NextToken
+					orderRequest = conn.list_orders_by_next_token(NextToken = nextToken)
+					for order in orderRequest.ListOrdersByNextTokenResult.Orders:
+						orders.append(order.AmazonOrderId)
+				except:
+					break
+		except:
+			break
+
+	
+	#subtract orders
+	#make adjustments
+	#store files
